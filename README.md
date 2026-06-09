@@ -151,16 +151,29 @@ invalid (it enforces a ~1% validity gate). The endpoint still returns HTTP 200 �
 output *shape*, not a fault. `benchmark.py` exposes `--extra-inputs` to pass fields like
 `reasoning_effort:low` when a given model needs them; it's empty by default.
 
-### Measured baseline (GPT-OSS-20B, `ml.g6.16xlarge`, sharegpt, concurrency 10, 300 req)
-Managed Amazon SageMaker AI inference benchmark (NVIDIA AIPerf), ~500 input / ~256 output
-tokens — this is the **before** the optimize beat improves on:
+### Before / after (GPT-OSS-20B, measured, sharegpt, ~500 in / ~256 out)
+The **before** is the baseline benchmark on a single GPU. The **after** is the configuration
+the SageMaker AI recommendation job found and projects — both measured on real infrastructure
+in us-west-2:
 
-| Metric | avg | p50 | p90 | p99 |
-|---|---|---|---|---|
-| Time to first token (ms) | 344 | 271 | 370 | 1971 |
-| Inter-token latency (ms) | 44.5 | 43.4 | 48.6 | 78.8 |
-| Request latency (ms) | 8399 | 6425 | 18042 | 34043 |
-| Output throughput (tok/s) | 218 | — | — | — |
+| | Before (baseline) | After (recommended config) |
+|---|---|---|
+| Serving config | `ml.g6.16xlarge`, 1× L4, 1 copy, concurrency 10 | `ml.g6.24xlarge`, 4× L4, **2 model copies**, TP=2, concurrency 88 |
+| **Output throughput** | **218 tok/s** | **~1,916 tok/s** (≈8.8×) |
+| Time to first token (p50) | 271 ms | 268 ms |
+| Inter-token latency (p50) | 43.4 ms | 42.9 ms |
+| Request latency (p50) | 6,425 ms | 11,051 ms |
+
+What moved the throughput ≈8.8× is the **serving configuration**, not a change to the model:
+the recommendation job determined that packing **2 copies of the model across a 4-GPU
+instance (TP=2) and driving concurrency 88** maximizes output tokens/sec — at a similar
+per-token latency. The point of the optimize beat is that **the agent found and validated
+that configuration for you**, instead of you sweeping it by hand. (Deeper, model-level gains —
+speculative decoding / EAGLE 3, quantization — are the `OptimizeModel=True` path; they need a
+large reserved instance and run long, so pre-bake them.)
+
+Baseline detail (the **before** row above): TTFT avg 344 / p90 370 / p99 1971 ms; ITL avg
+44.5 ms; request latency p90 18,042 / p99 34,043 ms.
 
 > **Why not just use SageMaker JumpStart?** JumpStart is perfect for one-click deploying
 > models in its catalog. This workflow is for the models that *aren't* — your own
