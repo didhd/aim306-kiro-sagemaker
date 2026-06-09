@@ -4,9 +4,9 @@ inclusion: always
 
 # Project context for Kiro
 
-This repo backs an **AWS Summit Los Angeles 2026 code-talk** (AIM306, June 10): take a raw
-open-weight LLM to a deployed, **benchmarked, and optimized** Amazon SageMaker AI endpoint
-**without writing the plumbing by hand** — drive everything through the agent.
+This repo takes a raw open-weight LLM to a deployed, **benchmarked, and optimized** Amazon
+SageMaker AI endpoint **without writing the plumbing by hand** — driving everything through a
+coding agent steered by SKILL.md contracts.
 
 ## Scope
 - **In:** deploy + managed benchmark + optimization (recommendation) + observability.
@@ -46,7 +46,8 @@ that sells the skills.
   `--deploy` (recommendation) / `--yes`; always tear down with `teardown.py --yes` when done.
 - Quota ≠ capacity: g7e can hit InsufficientInstanceCapacity; keep a fallback instance
   (e.g. g6.16xlarge) or a capacity reservation; pre-warm before the talk.
-- **Deep optimize is slow + needs reserved capacity (p5en-class) — pre-bake it**, show the
-  saved before/after on stage. Config search (`OptimizeModel=False`, g6.24xlarge) is live-able.
+- **Deep optimize is slow + needs reserved capacity (p5en-class)** — run it ahead of time and
+  keep the result, rather than waiting on it interactively. Config search
+  (`OptimizeModel=False`, g6.24xlarge) completes in minutes.
 - Some models need extra request fields (e.g. a reasoning model: `--extra-inputs
   "reasoning_effort:low"`) so the benchmark stays above AIPerf's validity gate.

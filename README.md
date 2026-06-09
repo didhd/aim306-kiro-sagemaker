@@ -48,8 +48,7 @@ compatible agent — the IDE is interchangeable, the contract is the asset.
 │   ├── deploy_recommendation.py           # deploy the recommendation's Model Package
 │   ├── cloudwatch_metrics.py              # endpoint observability after a run
 │   └── teardown.py                        # delete IC → endpoint → config → model
-├── notebooks/demo.ipynb                   # the SAME workflow by hand — the long way (see below)
-└── demo/storyboard.md                     # run-of-show
+└── notebooks/demo.ipynb                   # the SAME workflow by hand — the long way (see below)
 ```
 
 ## The whole point, in one picture
