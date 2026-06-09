@@ -130,9 +130,10 @@ These are the things that actually bite you — and what the talk is really abou
 
 **1. Quota ≠ capacity.** A deploy can sit in `Creating` and then fail with
 `InsufficientInstanceCapacity` *even when your quota is non-zero*. The newest instances
-(e.g. `g7e`) are the scarcest. Keep a **fallback instance** (`ml.g6.16xlarge` — 1× L40S
-48 GB — came up reliably in ~4 min) and **pre-warm on a capacity reservation** before a
-live demo.
+(e.g. `g7e`) are the scarcest. Keep a **fallback instance** (`ml.g6.16xlarge` — 1× L4
+24 GB, where GPT-OSS-20B's ~13 GB mxfp4 weights fit — came up reliably in ~4 min) and
+**pre-warm on a capacity reservation** before a live demo. (Instance families: g6 = L4
+24 GB, g6e = L40S 48 GB, g7e = B200.)
 
 **2. "Latest container" must match the GPU.** `deploy.py` resolves the newest vLLM Deep
 Learning Container from ECR live, picking the highest **vLLM version** (not the

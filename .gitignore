@@ -23,3 +23,5 @@ artifacts/
 
 # Local-only working record / memory — never push (holds account IDs, day-of playbook)
 CLAUDE.md
+# Local-only rehearsal run sheet — never push
+REHEARSAL.md

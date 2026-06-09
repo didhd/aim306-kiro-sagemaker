@@ -46,10 +46,14 @@ then set `tensor_parallel_size = GPU count`.
 
 | Instance | GPU | GPU mem | Good for |
 |---|---|---|---|
-| `ml.g6.16xlarge` | 1× L40S | 48 GB | ≤13B bf16, or 20B quantized; **reliable capacity** |
-| `ml.g6e.12xlarge` | 4× L40S | 192 GB | larger / multimodal, TP=4 |
+| `ml.g6.16xlarge` | 1× L4 | 24 GB | ≤13B, or ~20B quantized (GPT-OSS-20B mxfp4 fits); **reliable capacity** |
+| `ml.g6.24xlarge` | 4× L4 | 96 GB | larger / TP=4; recommendation-job target |
+| `ml.g6e.16xlarge` | 1× L40S | 48 GB | single big GPU — ~30B or long context |
+| `ml.g6e.12xlarge` | 4× L40S | 192 GB | larger, TP=4 |
 | `ml.g7e.2xlarge` | 1× B200 | ~180 GB | newest; **capacity scarce** (see guard) |
 | `ml.g7e.12xlarge` | 2× B200 | ~360 GB | 30B+ / FP8; quota often 0 |
+
+(Families: **g6** = L4 24 GB, **g6e** = L40S 48 GB, **g5** = A10G 24 GB, **g7e** = B200.)
 
 **Capacity guard (non-negotiable):** quota ≠ available capacity. A deploy can sit in
 `Creating` then fail with `InsufficientInstanceCapacity` even at nonzero quota. Always:

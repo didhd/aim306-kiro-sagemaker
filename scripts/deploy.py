@@ -48,12 +48,18 @@ import config  # region / account / role / bucket — all auto-detected, nothing
 # not need per-model maintenance. Add a row here if you want a new instance type.
 # ---------------------------------------------------------------------------
 INSTANCE_GPUS = {
-    "ml.g6.16xlarge": 1,   # 1x L40S  48 GB  — reliable capacity; our default
-    "ml.g6.12xlarge": 4,   # 4x L40S 192 GB
-    "ml.g6.24xlarge": 4,   # 4x L40S 192 GB  — recommendation-job target
-    "ml.g6.48xlarge": 8,   # 8x L40S 384 GB
-    "ml.g6e.12xlarge": 4,  # 4x L40S 192 GB  — larger context / headroom
-    "ml.g5.12xlarge": 4,   # 4x A10G
+    # g6  = NVIDIA L4  (24 GB/GPU) — cheapest GPUs; the xlarge..16xlarge sizes are all 1 GPU.
+    "ml.g6.16xlarge": 1,   # 1x L4   24 GB  — reliable capacity; our default (GPT-OSS-20B mxfp4 ~13 GB fits)
+    "ml.g6.12xlarge": 4,   # 4x L4   96 GB
+    "ml.g6.24xlarge": 4,   # 4x L4   96 GB  — recommendation-job target
+    "ml.g6.48xlarge": 8,   # 8x L4  192 GB
+    # g6e = NVIDIA L40S (48 GB/GPU) — 2x the GPU memory of g6; xlarge..16xlarge are all 1 GPU.
+    "ml.g6e.16xlarge": 1,  # 1x L40S 48 GB  — single big GPU; headroom for ~30B or long context
+    "ml.g6e.12xlarge": 4,  # 4x L40S 192 GB
+    "ml.g6e.24xlarge": 4,  # 4x L40S 192 GB
+    "ml.g6e.48xlarge": 8,  # 8x L40S 384 GB
+    # g5  = NVIDIA A10G (24 GB/GPU); g7e = NVIDIA B200 (~180 GB/GPU, newest, capacity scarce).
+    "ml.g5.12xlarge": 4,   # 4x A10G  96 GB
     "ml.g7e.2xlarge": 1,   # 1x B200 ~180 GB — newest, but capacity is scarce
     "ml.g7e.12xlarge": 2,  # 2x B200
 }

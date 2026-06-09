@@ -64,6 +64,11 @@ poll `describe_ai_recommendation_job` → deploy the result's Model Package
 ## Guards
 - The recommendation/benchmark service assumes your execution role — it must trust
   `sagemaker.amazonaws.com`.
+- **Execution role needs `servicequotas:GetServiceQuota`** (also `ListServiceQuotas` /
+  `GetAWSDefaultServiceQuota`). The recommendation job checks instance quota before it runs;
+  without this it **fails in ~60s** with `AccessDeniedException: Role lacks
+  servicequotas:GetServiceQuota`. `AmazonSageMakerFullAccess` does **not** include it — add a
+  small inline policy. (The plain deploy/benchmark path does not need this — it's optimize-only.)
 - Deep optimize needs real capacity for a large instance; without a reservation it can fail
   to get capacity. Pre-bake and keep the result in S3.
 - Compare like-for-like: run the baseline and the optimized benchmark with the **same
