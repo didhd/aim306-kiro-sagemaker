@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# AWS / creds — never commit credentials
+.aws/
+*.pem
+
+# Local benchmark outputs / downloaded artifacts
+results/
+artifacts/
+*.tar.gz
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Agent tooling (local only)
+.omc/
+
+# Local-only working record / memory — never push (holds account IDs, day-of playbook)
+CLAUDE.md
