@@ -34,13 +34,13 @@ coding agent steered by SKILL.md contracts.
 ## Demo path
 Deploy via `sagemaker-deploy` → show the SKILL.md contract → `sagemaker-benchmark` (baseline)
 → read CloudWatch → `sagemaker-optimize` (recommend → redeploy → before/after) → tear down.
-Reference scripts in `scripts/` (`deploy.py`, `smoke_test.py`, `benchmark.py`, `recommend.py`,
-`deploy_recommendation.py`, `cloudwatch_metrics.py`, `teardown.py`) — run them, don't rewrite.
+Each skill bundles its own `scripts/` (e.g. `.kiro/skills/sagemaker-deploy/scripts/deploy.py`) —
+run them, don't rewrite. config.py + teardown.py are bundled into each skill that needs them.
 `notebooks/demo.ipynb` is the **fully-manual "long way"** (all boto3 inline) — the contrast
 that sells the skills.
 
 ## Notes
-- **No hardcoded account.** Region / account / role / bucket auto-detect via `scripts/config.py`,
+- **No hardcoded account.** Region / account / role / bucket auto-detect via each skill's `config.py`,
   so the repo runs unchanged in any account.
 - **Billable resources are opt-in:** scripts dry-run unless given `--deploy` / `--run` /
   `--deploy` (recommendation) / `--yes`; always tear down with `teardown.py --yes` when done.

@@ -6,6 +6,11 @@ description: >
   inference recommendations; NVIDIA AIPerf under the hood). Measures TTFT, ITL,
   request-latency percentiles, and throughput. Use when the user asks to
   benchmark / load-test / measure the performance of a live endpoint.
+license: Apache-2.0
+compatibility: Requires AWS credentials with Amazon SageMaker AI access and Python with boto3>=1.43 (the create_ai_workload_config / create_ai_benchmark_job APIs); bundled scripts run on the local machine.
+metadata:
+  author: aim306-kiro-sagemaker
+  version: "1.0"
 ---
 
 # sagemaker-benchmark

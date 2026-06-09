@@ -7,6 +7,11 @@ description: >
   knobs) and deep optimization (speculative decoding / EAGLE 3, quantization, kernel
   tuning). Use when the user asks to optimize, speed up, tune, or get a recommendation
   for a deployed or to-be-deployed model.
+license: Apache-2.0
+compatibility: Requires AWS credentials with Amazon SageMaker AI access (execution role needs servicequotas:GetServiceQuota) and Python with boto3>=1.43; bundled scripts run on the local machine.
+metadata:
+  author: aim306-kiro-sagemaker
+  version: "1.0"
 ---
 
 # sagemaker-optimize

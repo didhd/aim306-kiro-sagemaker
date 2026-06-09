@@ -7,6 +7,11 @@ description: >
   Use when the user asks to deploy / host / serve an open-weight model (e.g. GPT-OSS-20B)
   on SageMaker for inference or benchmarking. Works for any HuggingFace SafeTensor model
   the vLLM container supports — nothing here is model-specific.
+license: Apache-2.0
+compatibility: Requires AWS credentials with Amazon SageMaker AI access and Python with boto3>=1.43; bundled scripts run on the local machine.
+metadata:
+  author: aim306-kiro-sagemaker
+  version: "1.0"
 ---
 
 # sagemaker-deploy

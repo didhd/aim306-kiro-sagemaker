@@ -31,25 +31,31 @@ watching it *honor a contract*. That's the difference between a demo and product
 skills follow the open [Agent Skills](https://docs.kiro.dev) format, so they work with any
 compatible agent — the IDE is interchangeable, the contract is the asset.
 
+Each skill is **self-contained** (per the [Agent Skills spec](https://agentskills.io)): its
+`SKILL.md` and the `scripts/` it needs live together in one folder, so a skill is portable on
+its own. `config.py` (and `teardown.py`) are bundled into each skill that uses them.
+
 ```
 .
 ├── .kiro/
 │   ├── skills/
-│   │   ├── sagemaker-deploy/SKILL.md      # contract: deploy any OSS model as an Inference Component
-│   │   ├── sagemaker-benchmark/SKILL.md   # contract: managed SageMaker AI inference benchmark
-│   │   └── sagemaker-optimize/SKILL.md    # contract: recommend an optimized config + redeploy
+│   │   ├── sagemaker-deploy/               # contract: deploy any OSS model as an Inference Component
+│   │   │   ├── SKILL.md
+│   │   │   └── scripts/                    # config.py, deploy.py, smoke_test.py, teardown.py
+│   │   ├── sagemaker-benchmark/            # contract: managed SageMaker AI inference benchmark
+│   │   │   ├── SKILL.md
+│   │   │   └── scripts/                    # config.py, benchmark.py, cloudwatch_metrics.py
+│   │   └── sagemaker-optimize/             # contract: recommend an optimized config + redeploy
+│   │       ├── SKILL.md
+│   │       └── scripts/                    # config.py, recommend.py, deploy_recommendation.py, teardown.py
 │   └── steering/codetalk.md               # Kiro steering for this project
-├── scripts/                               # reference implementations of the contracts (boto3)
-│   ├── config.py                          # auto-detect region / account / role / bucket
-│   ├── deploy.py                          # CreateModel → …Endpoint → InferenceComponent → smoke
-│   ├── smoke_test.py                      # one chat request against the endpoint
-│   ├── benchmark.py                       # managed AIPerf benchmark via create_ai_benchmark_job
-│   ├── recommend.py                       # create_ai_recommendation_job (config search / deep optimize)
-│   ├── deploy_recommendation.py           # deploy the recommendation's Model Package
-│   ├── cloudwatch_metrics.py              # endpoint observability after a run
-│   └── teardown.py                        # delete IC → endpoint → config → model
 └── notebooks/demo.ipynb                   # the SAME workflow by hand — the long way (see below)
 ```
+
+The bundled scripts (boto3 reference implementations of the contracts):
+`config.py` (auto-detect region/account/role/bucket) · `deploy.py` · `smoke_test.py` ·
+`benchmark.py` · `recommend.py` · `deploy_recommendation.py` · `cloudwatch_metrics.py` ·
+`teardown.py`.
 
 ## The whole point, in one picture
 
@@ -89,25 +95,32 @@ of natural-language prompts — Kiro fires the matching skill and runs the refer
 ## Or run it by hand
 
 Every script is **dry-run by default** and prints its plan; add the flag to make it billable.
+The scripts are bundled inside the skill folder that uses them (paths below). Run them from the
+skill's `scripts/` directory, or pass the full path.
 
 ```bash
-python scripts/config.py                                  # confirm the resolved AWS context
-python scripts/deploy.py                                  # dry run — print the deploy plan
-python scripts/deploy.py --deploy                         # create the endpoint (billable)
+# Deploy skill
+cd .kiro/skills/sagemaker-deploy/scripts
+python config.py                                  # confirm the resolved AWS context
+python deploy.py                                  # dry run — print the deploy plan
+python deploy.py --deploy                         # create the endpoint (billable)
+python smoke_test.py --endpoint NAME --ic IC      # one chat request
 
-python scripts/smoke_test.py --endpoint NAME --ic IC      # one chat request
-python scripts/benchmark.py --endpoint NAME --ic IC --run # baseline benchmark (billable)
+# Benchmark skill
+cd ../../sagemaker-benchmark/scripts
+python benchmark.py --endpoint NAME --ic IC --run # baseline benchmark (billable)
+python cloudwatch_metrics.py --endpoint NAME --ic IC
 
-python scripts/recommend.py --instance ml.g6.24xlarge --run         # find an optimized config
-python scripts/deploy_recommendation.py --rec-job REC_JOB --deploy  # deploy the recommendation
+# Optimize skill
+cd ../../sagemaker-optimize/scripts
+python recommend.py --instance ml.g6.24xlarge --run        # find an optimized config
+python deploy_recommendation.py --rec-job REC_JOB --deploy # deploy the recommendation
 # …then benchmark the new endpoint and compare to the baseline → before/after.
-
-python scripts/cloudwatch_metrics.py --endpoint NAME --ic IC
-python scripts/teardown.py --endpoint NAME --yes          # delete everything (stops billing)
+python teardown.py --endpoint NAME --yes          # delete everything (stops billing)
 ```
 
 ### Runs in any account — nothing hardcoded
-`scripts/config.py` resolves region, account, execution role, and bucket from the live
+Each skill's `scripts/config.py` resolves region, account, execution role, and bucket from the live
 environment (STS + the SageMaker SDK). There is **no account ID in this repo**. Clone it,
 run it, and it targets *your* environment — automatically in SageMaker Studio, or with
 `SAGEMAKER_ROLE_ARN` / `SAGEMAKER_BUCKET` set anywhere else.
@@ -184,7 +197,7 @@ Baseline detail (the **before** row above): TTFT avg 344 / p90 370 / p99 1971 ms
 
 ## Cost & cleanup
 Real-time endpoints keep a GPU instance running and **bill while `InService`**. The billable
-steps require an explicit flag (`--deploy`, `--run`, `--yes`), and **`scripts/teardown.py`
+steps require an explicit flag (`--deploy`, `--run`, `--yes`), and **the bundled `teardown.py`
 deletes everything** (inference component → endpoint → endpoint config → model). Run it the
 moment you're done.
 
