@@ -8,16 +8,27 @@ The agent (Kiro) reads that SKILL.md, then runs this script — so the deploy is
     CreateModel -> CreateEndpointConfig -> CreateEndpoint
                 -> CreateInferenceComponent -> smoke test
 
+Model-agnostic by design
+------------------------
+There is no per-model hard-coding here. Point this at ANY Hugging Face SafeTensor model
+staged in S3 and it deploys the same way — the only things that change are the S3 path,
+the instance, and a couple of vLLM sizing knobs, all passed as arguments. We use
+GPT-OSS-20B as the running example because it is a strong open-weight model that is NOT
+one-click available in SageMaker JumpStart — i.e. exactly the "raw weights -> production"
+case this talk is about. The contract works identically for Llama, Mistral, Qwen, etc.
+
 Why an Inference Component (IC)?
-    An IC lets multiple models share an endpoint's GPUs and declares the model's
-    compute needs (memory + accelerators) explicitly. It is the modern, packable
-    way to host models on SageMaker and the unit the benchmark targets.
+    An IC lets one or more models share an endpoint's GPUs and declares each model's
+    compute footprint (memory + accelerators) explicitly. It is the modern, packable
+    way to host models on SageMaker, and it is the unit the benchmark / recommendation
+    services target by name.
 
 Usage:
     python scripts/deploy.py                                   # dry run: print the plan
     python scripts/deploy.py --deploy                          # create it (billable!)
-    python scripts/deploy.py --model gpt-oss-20b --deploy
-    python scripts/deploy.py --instance ml.g6.16xlarge --deploy
+    python scripts/deploy.py --model-id my-llm \\
+        --model-s3 s3://my-bucket/models/my-llm/ \\
+        --instance ml.g6.16xlarge --deploy
 """
 import argparse
 import json
@@ -29,43 +40,37 @@ import boto3
 
 import config  # region / account / role / bucket — all auto-detected, nothing hardcoded
 
-# ---------------------------------------------------------------------------
-# Model presets. These are the "options" the SKILL.md leaves open, resolved to
-# concrete values so the deploy is reproducible. Each entry says: where the
-# weights live in S3, how much GPU memory to reserve, and the context length cap.
-# ---------------------------------------------------------------------------
-MODELS = {
-    # GPT-OSS-20B — our hero. ~13 GB in mxfp4, fits comfortably on one 48 GB GPU.
-    # It is a *reasoning* model: see the note in scripts/benchmark.py about why the
-    # benchmark gives it a generous output budget.
-    "gpt-oss-20b": {
-        "s3_subpath": "models/gpt-oss-20b/",
-        "min_memory_mb": 40 * 1024,   # reserve 40 GB for weights + KV cache
-        "max_model_len": 16384,       # plenty for chat / benchmark prompts
-        "extra_env": {},
-    },
-    # Gemma 4 12B kept here only as a teaching example of "size to the model."
-    # Heads-up (validated): Gemma 4 has no native vLLM implementation in today's DLC,
-    # so it falls back to the Transformers backend and crashes while profiling the
-    # multimodal path. We deploy GPT-OSS-20B on stage. See README "What we learned."
-    "gemma-4-12b-it": {
-        "s3_subpath": "models/gemma-4-12b-it/",
-        "min_memory_mb": 48 * 1024,
-        "max_model_len": 8192,
-        "extra_env": {"SM_VLLM_GPU_MEMORY_UTILIZATION": "0.85"},
-    },
-}
 
+# ---------------------------------------------------------------------------
 # GPU count per instance type. tensor_parallel_size is set to this number so the
-# model is sharded across exactly the GPUs the instance has.
+# model is sharded across exactly the GPUs the instance has. This is the only
+# "table" we keep — it is about HARDWARE, not about any specific model, so it does
+# not need per-model maintenance. Add a row here if you want a new instance type.
+# ---------------------------------------------------------------------------
 INSTANCE_GPUS = {
-    "ml.g6.16xlarge": 1,   # 1x L40S 48 GB  — reliable capacity, our primary
-    "ml.g6.12xlarge": 4,   # 4x L40S
-    "ml.g6e.12xlarge": 4,  # 4x L40S 192 GB — larger / multimodal
+    "ml.g6.16xlarge": 1,   # 1x L40S  48 GB  — reliable capacity; our default
+    "ml.g6.12xlarge": 4,   # 4x L40S 192 GB
+    "ml.g6.24xlarge": 4,   # 4x L40S 192 GB  — recommendation-job target
+    "ml.g6.48xlarge": 8,   # 8x L40S 384 GB
+    "ml.g6e.12xlarge": 4,  # 4x L40S 192 GB  — larger context / headroom
+    "ml.g5.12xlarge": 4,   # 4x A10G
     "ml.g7e.2xlarge": 1,   # 1x B200 ~180 GB — newest, but capacity is scarce
     "ml.g7e.12xlarge": 2,  # 2x B200
-    "ml.g5.12xlarge": 4,   # 4x A10G
 }
+
+
+def gpus_for(instance: str) -> int:
+    """How many GPUs the instance has (so we can set tensor-parallel = GPU count).
+
+    Falls back to a conservative 1 for an unknown instance type and prints a note,
+    so a typo never silently sets the wrong parallelism.
+    """
+    n = INSTANCE_GPUS.get(instance)
+    if n is None:
+        print(f"  note: unknown instance {instance!r}; assuming 1 GPU "
+              f"(add it to INSTANCE_GPUS to be explicit).")
+        return 1
+    return n
 
 
 # The canonical SageMaker vLLM runtime tag looks like:
@@ -103,12 +108,46 @@ def latest_vllm_dlc(region: str) -> str:
     return f"763104351884.dkr.ecr.{region}.amazonaws.com/vllm:{best_tag}"
 
 
+def build_env(num_gpu: int, max_model_len: int, max_num_seqs: int, extra: dict) -> dict:
+    """Assemble the vLLM container configuration.
+
+    vLLM on SageMaker is configured purely through SM_VLLM_* environment variables —
+    no Dockerfile, no custom image. Every model deploys through the same container;
+    only these knobs change. That is what makes the deploy model-agnostic.
+    """
+    env = {
+        "SM_VLLM_MODEL": "/opt/ml/model",                 # where the weights mount inside the container
+        "SM_VLLM_TENSOR_PARALLEL_SIZE": str(num_gpu),     # shard the model across all GPUs on the instance
+        "SM_VLLM_MAX_NUM_SEQS": str(max_num_seqs),        # max concurrent sequences the server will batch
+        "SM_VLLM_MAX_MODEL_LEN": str(max_model_len),      # context-length cap; drives KV-cache sizing
+        # Skip CUDA-graph capture -> faster cold start (good for a live demo).
+        # For a production workload, drop this: CUDA graphs improve steady-state throughput.
+        "SM_VLLM_ENFORCE_EAGER": "true",
+    }
+    env.update(extra or {})
+    return env
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Deploy an OSS LLM to a SageMaker AI endpoint.")
-    ap.add_argument("--model", default="gpt-oss-20b", choices=list(MODELS),
-                    help="which preset model to deploy (default: gpt-oss-20b)")
+    ap = argparse.ArgumentParser(description="Deploy an open-weight LLM to a SageMaker AI endpoint.")
+    # --- What to deploy (model-agnostic: defaults to GPT-OSS-20B, but takes anything) ---
+    ap.add_argument("--model-id", default="gpt-oss-20b",
+                    help="friendly name used for the endpoint / IC / model resources")
+    ap.add_argument("--model-s3", default=None,
+                    help="S3 URI of the HuggingFace SafeTensor weights "
+                         "(default: s3://<bucket>/models/<model-id>/)")
     ap.add_argument("--instance", default="ml.g6.16xlarge",
                     help="GPU instance type (default: ml.g6.16xlarge — reliable capacity)")
+    # --- vLLM sizing knobs (sensible defaults; override per model if needed) ---
+    ap.add_argument("--max-model-len", type=int, default=16384,
+                    help="max context length (caps KV-cache memory)")
+    ap.add_argument("--max-num-seqs", type=int, default=32,
+                    help="max sequences batched concurrently by vLLM")
+    ap.add_argument("--min-memory-mb", type=int, default=40 * 1024,
+                    help="memory reserved for the inference component (weights + KV cache)")
+    ap.add_argument("--env", default="{}",
+                    help='extra SM_VLLM_* env as JSON, e.g. \'{"SM_VLLM_GPU_MEMORY_UTILIZATION":"0.9"}\'')
+    # --- Safety: nothing billable happens without --deploy ---
     ap.add_argument("--deploy", action="store_true",
                     help="actually create resources; without this it's a dry run")
     ap.add_argument("--timeout", type=int, default=1800,
@@ -121,34 +160,26 @@ def main() -> int:
     role = config.execution_role_arn(sess)
     bucket = config.bucket(sess)
 
-    cfg = MODELS[args.model]
-    num_gpu = INSTANCE_GPUS.get(args.instance, 1)
+    num_gpu = gpus_for(args.instance)
     image = latest_vllm_dlc(region)
-    model_s3 = f"s3://{bucket}/{cfg['s3_subpath']}"
+    model_s3 = args.model_s3 or f"s3://{bucket}/models/{args.model_id}/"
+    try:
+        extra_env = json.loads(args.env)
+    except json.JSONDecodeError as e:
+        print(f"--env is not valid JSON: {e}")
+        return 2
 
-    # Unique, readable names: <model>-<MMDDhhmmss>. The IC name shares the stem.
+    # Unique, readable resource names: <model-id>-<MMDDhhmmss>. The IC shares the stem.
     stamp = time.strftime("%y%m%d-%H%M%S")
-    name = f"{args.model}-{stamp}"
+    name = f"{args.model_id}-{stamp}"
     ic_name = f"ic-{name}"
-
-    # vLLM is configured purely through SM_VLLM_* environment variables — no Dockerfile,
-    # no custom image. tensor_parallel_size = GPU count shards the model across the GPUs.
-    env = {
-        "SM_VLLM_MODEL": "/opt/ml/model",                       # weights mount path in the container
-        "SM_VLLM_TENSOR_PARALLEL_SIZE": str(num_gpu),           # shard across all GPUs on the instance
-        "SM_VLLM_MAX_NUM_SEQS": "32",                           # max concurrent sequences
-        "SM_VLLM_MAX_MODEL_LEN": str(cfg["max_model_len"]),     # context-length cap (KV cache sizing)
-        # Skip CUDA-graph capture -> faster cold start (good for a live demo).
-        # For a production workload, drop this: CUDA graphs improve steady-state throughput.
-        "SM_VLLM_ENFORCE_EAGER": "true",
-        **cfg["extra_env"],
-    }
+    env = build_env(num_gpu, args.max_model_len, args.max_num_seqs, extra_env)
 
     # --- Print the plan. On stage this is the "here's exactly what will happen" moment. ---
     print("=== DEPLOY PLAN (sagemaker-deploy contract) ===")
     print(f"  region     : {region}")
     print(f"  account    : {config.account_id(sess)}")
-    print(f"  model      : {args.model}")
+    print(f"  model-id   : {args.model_id}")
     print(f"  instance   : {args.instance}  (tensor_parallel_size = {num_gpu})")
     print(f"  container  : {image}")
     print(f"  weights    : {model_s3}")
@@ -204,7 +235,7 @@ def main() -> int:
 
     # 4) CreateInferenceComponent — declare the model's compute footprint and place it
     #    on the variant. This is what makes the GPU(s) packable and what the benchmark
-    #    targets by name.
+    #    and recommendation services target by name.
     sm.create_inference_component(
         InferenceComponentName=ic_name, EndpointName=name, VariantName="v1",
         Specification={
@@ -213,7 +244,7 @@ def main() -> int:
                 "ModelDataDownloadTimeoutInSeconds": args.timeout,
                 "ContainerStartupHealthCheckTimeoutInSeconds": args.timeout},
             "ComputeResourceRequirements": {
-                "MinMemoryRequiredInMb": cfg["min_memory_mb"],
+                "MinMemoryRequiredInMb": args.min_memory_mb,
                 "NumberOfAcceleratorDevicesRequired": num_gpu}},
         RuntimeConfig={"CopyCount": 1})
     print("Inference component creating…")
@@ -238,7 +269,7 @@ def main() -> int:
     print(f"IC_NAME={ic_name}")
     print(f"TIMING total_deploy_sec={int(time.time() - t0)}")
 
-    # 6) Smoke test — prove the endpoint actually answers, using the OpenAI-style chat
+    # 5) Smoke test — prove the endpoint actually answers, using the OpenAI-style chat
     #    schema the vLLM DLC speaks. We target the IC by name. A failure here is a
     #    warning, not a crash: the endpoint is up, you can still benchmark and tear down.
     payload = {"messages": [{"role": "user", "content": "Reply with exactly: pong"}],

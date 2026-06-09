@@ -14,13 +14,23 @@ the standard AIPerf metrics to S3: time-to-first-token (TTFT), inter-token laten
 The three public APIs, in order:
     create_ai_workload_config  ->  create_ai_benchmark_job  ->  describe_ai_benchmark_job
 
-This is the *baseline* (pre-optimization) benchmark. Speculative decoding (EAGLE),
-quantization, etc. live in the separate recommendation/optimization path and are out
-of scope for this talk.
+This produces the **baseline** number we later compare against an optimized config
+(see scripts/recommend.py + scripts/deploy_recommendation.py for the "make it faster"
+beat). Benchmark first, optimize second, benchmark again -> before/after.
+
+Model-agnostic
+--------------
+Nothing here is specific to a particular model. The workload is just "realistic chat
+traffic from the sharegpt dataset." One optional knob, ``--extra-inputs``, lets you pass
+provider-specific request fields when a model needs them (example below) — but it
+defaults to empty, so the same command benchmarks any deployed endpoint.
 
 Usage:
     python scripts/benchmark.py --endpoint NAME --ic IC_NAME           # dry run
     python scripts/benchmark.py --endpoint NAME --ic IC_NAME --run     # launch (billable)
+    # Optional, only if your model uses extra request fields:
+    python scripts/benchmark.py --endpoint NAME --ic IC_NAME \\
+        --extra-inputs "reasoning_effort:low" --run
 """
 import argparse
 import json
@@ -30,37 +40,47 @@ import boto3
 
 import config  # region / role / bucket — auto-detected, nothing hardcoded
 
+
 # ---------------------------------------------------------------------------
-# The workload. These numbers describe a realistic chat load. Tuned defaults for
-# the talk; override on the CLI if you want a heavier or lighter run.
+# The workload. These numbers describe a realistic chat load against the endpoint:
+# ~500-token prompts from the public sharegpt dataset, a fixed output budget, and a
+# chosen concurrency. Tuned defaults for the talk; override on the CLI for a heavier
+# or lighter run. None of this is model-specific.
 # ---------------------------------------------------------------------------
-def workload_spec(concurrency: int, request_count: int, out_tokens: int) -> dict:
-    return {
-        "benchmark": {"type": "aiperf"},
-        "parameters": {
-            "public_dataset": "sharegpt",          # real conversational prompts
-            "prompt_input_tokens_mean": 500, "prompt_input_tokens_stddev": 10,
-            # GPT-OSS-20B is a *reasoning* model. With a tiny output budget it can
-            # spend every token in its hidden "reasoning" channel and return an empty
-            # `content`, which AIPerf scores as an invalid result. So we give it a
-            # generous output budget AND ask for low reasoning effort, so the visible
-            # answer actually gets written. (We do NOT set ignore_eos — let it stop.)
-            "output_tokens_mean": out_tokens, "output_tokens_stddev": 16,
-            "extra_inputs": "reasoning_effort:low",
-            "concurrency": concurrency,            # simultaneous in-flight requests
-            "request_count": request_count,        # total requests in the run
-        },
+def workload_spec(concurrency: int, request_count: int, out_tokens: int,
+                  extra_inputs: str) -> dict:
+    params = {
+        "public_dataset": "sharegpt",               # real conversational prompts
+        "prompt_input_tokens_mean": 500,            # ~500-token inputs…
+        "prompt_input_tokens_stddev": 10,           # …with a little natural variation
+        "output_tokens_mean": out_tokens,           # how many tokens to ask the model to generate
+        "output_tokens_stddev": 16,
+        "concurrency": concurrency,                 # simultaneous in-flight requests
+        "request_count": request_count,             # total requests in the run
     }
+    # Optional, model-specific request fields. Left empty by default so the benchmark
+    # is model-agnostic. Example: a reasoning model that otherwise spends its whole
+    # output budget "thinking" and returns empty visible text can be nudged with
+    #   --extra-inputs "reasoning_effort:low"
+    # so the answer actually gets written (which keeps AIPerf's validity rate high).
+    if extra_inputs:
+        params["extra_inputs"] = extra_inputs
+    return {"benchmark": {"type": "aiperf"}, "parameters": params}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Managed benchmark of a SageMaker AI endpoint.")
     ap.add_argument("--endpoint", required=True, help="endpoint name from deploy.py")
     ap.add_argument("--ic", required=True, help="inference component name from deploy.py")
-    ap.add_argument("--concurrency", type=int, default=10)
-    ap.add_argument("--requests", type=int, default=300)
+    ap.add_argument("--concurrency", type=int, default=10,
+                    help="simultaneous in-flight requests (default: 10)")
+    ap.add_argument("--requests", type=int, default=300,
+                    help="total requests in the run (default: 300)")
     ap.add_argument("--out-tokens", type=int, default=256,
-                    help="mean output tokens (keep >=256 for reasoning models)")
+                    help="mean output tokens to generate per request (default: 256)")
+    ap.add_argument("--extra-inputs", default="",
+                    help='optional model-specific request fields, space-separated '
+                         '(e.g. "reasoning_effort:low"); empty by default')
     ap.add_argument("--run", action="store_true",
                     help="actually launch the job; without this it's a dry run")
     args = ap.parse_args()
@@ -71,7 +91,7 @@ def main() -> int:
     # Results land under the SageMaker default bucket so the role can already write there.
     s3_output = f"s3://{config.bucket(sess)}/benchmark-output/"
 
-    spec = workload_spec(args.concurrency, args.requests, args.out_tokens)
+    spec = workload_spec(args.concurrency, args.requests, args.out_tokens, args.extra_inputs)
     stamp = time.strftime("%y%m%d-%H%M%S")
     config_name = f"wl-{stamp}"     # the reusable workload definition
     job_name = f"bench-{stamp}"     # this specific run
@@ -125,10 +145,12 @@ def main() -> int:
                   "profile_export.jsonl (per-request).")
             break
         if status not in running:
-            # Failed / Stopped — or any unexpected terminal state. Note: a reasoning
-            # model can trip AIPerf's ~1% validity gate even though the endpoint
-            # returned 200 for every request and the metrics over the valid requests
-            # are sound. See README "What we learned."
+            # Failed / Stopped, or any unexpected terminal state. One thing to know:
+            # AIPerf enforces a ~1% result-validity gate. A model that sometimes returns
+            # empty visible text (e.g. a reasoning model that spends its whole budget
+            # "thinking") can trip that gate even though the endpoint returned 200 for
+            # every request and the metrics over the valid requests are sound. If you
+            # hit this, pass an appropriate --extra-inputs for that model.
             print("FailureReason:", d.get("FailureReason", "(none reported)"))
             break
         time.sleep(30)

@@ -48,7 +48,8 @@ workload_spec = {
         "public_dataset": "sharegpt",
         "prompt_input_tokens_mean": 500, "prompt_input_tokens_stddev": 10,
         "output_tokens_mean": 256, "output_tokens_stddev": 16,
-        "extra_inputs": "reasoning_effort:low",   # see reasoning-model note below
+        # Model-agnostic by default. Add only if a model needs it (see reasoning-model note):
+        #   "extra_inputs": "reasoning_effort:low",
         "concurrency": 10, "request_count": 300,
     },
 }

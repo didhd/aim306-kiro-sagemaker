@@ -4,9 +4,9 @@ description: >
   Deploy an open-weight LLM to a SageMaker AI real-time endpoint as an Inference
   Component, using the latest vLLM Deep Learning Container, a GPU instance sized to
   the model, tensor-parallel set to the GPU count, and model weights staged in S3.
-  Use when the user asks to deploy / host / serve an OSS model (e.g. GPT-OSS-20B) on
-  SageMaker for inference or benchmarking. Check the model table for vLLM compatibility
-  before picking an instance — not every open model serves on the current DLC.
+  Use when the user asks to deploy / host / serve an open-weight model (e.g. GPT-OSS-20B)
+  on SageMaker for inference or benchmarking. Works for any HuggingFace SafeTensor model
+  the vLLM container supports — nothing here is model-specific.
 ---
 
 # sagemaker-deploy
@@ -19,20 +19,25 @@ interchangeable — this contract is what travels.
 ## Scope
 
 Deploy a HuggingFace SafeTensor OSS model from **S3** to a SageMaker AI real-time
-endpoint via an **Inference Component** (IC). Plain deploy — no perf/optimization step
-(that's the `sagemaker-benchmark` skill). Path is fixed:
+endpoint via an **Inference Component** (IC). Plain deploy — measurement is the
+`sagemaker-benchmark` skill, and optimization is the `sagemaker-optimize` skill. Path is fixed:
 `CreateModel → CreateEndpointConfig → CreateEndpoint → CreateInferenceComponent → smoke test`.
 
-## Decision 1 — Model (ask or infer; don't hardcode)
+## Decision 1 — Model (take any open-weight model; size by its properties)
 
-| Model | HF id | Weights | Modality | Status on current vLLM DLC |
-|---|---|---|---|---|
-| GPT-OSS-20B | `openai/gpt-oss-20b` | ~13 GB (mxfp4) | text, **reasoning** | ✅ **VALIDATED** — hero model; reasoning output → see benchmark caveat |
-| Gemma 4 12B-IT | `google/gemma-4-12b-it` | ~24 GB (bf16) | **multimodal** (text+vision) | ❌ **NOT VALIDATED** — no native vLLM impl; falls back to Transformers backend and crashes during multimodal `profile_run`. Do **not** deploy until the DLC adds `gemma4_unified` support. Kept here as a cautionary example. |
-| (other OSS) | — | — | — | confirm vLLM support + size before picking an instance |
+This skill is model-agnostic. Deploy whatever open-weight model the user names; you only
+need three facts about it, which then drive Decisions 2–4:
 
-Default to the model the user names — but if it's marked NOT VALIDATED, surface that and
-deploy GPT-OSS-20B instead. If unspecified, ask. Do not assume.
+| Property | Why it matters | Drives |
+|---|---|---|
+| Weights size (GB) + dtype | must fit in GPU memory alongside the KV cache | instance choice (Decision 2) |
+| vLLM support | the DLC serves models with a native vLLM implementation | instance + go/no-go |
+| Context length needed | longer context = more KV-cache memory | `max_model_len` (Decision 4) |
+
+Default running example: **GPT-OSS-20B** (`openai/gpt-oss-20b`, ~13 GB mxfp4, text +
+reasoning) — a strong open model that is **not** one-click in JumpStart, i.e. the exact
+"raw weights → production" case this skill is for. If the user names another model, deploy
+that one; if unspecified, ask. The same path works for Llama, Mistral, Qwen, etc.
 
 ## Decision 2 — Instance (size to the model, then check capacity)
 
@@ -69,22 +74,22 @@ Ampere (g5) needs cu128. Mismatch = container won't start.
 
 ## Decision 4 — vLLM env (per-model knobs)
 
-Base:
+Base (same for every model — only the values change):
 ```python
 env = {
   "SM_VLLM_MODEL": "/opt/ml/model",
   "SM_VLLM_TENSOR_PARALLEL_SIZE": str(num_gpu),
   "SM_VLLM_MAX_NUM_SEQS": "32",
-  "SM_VLLM_MAX_MODEL_LEN": "16384",   # cap; e.g. Gemma 4's native 262144 won't fit KV on 1 GPU
+  "SM_VLLM_MAX_MODEL_LEN": "16384",   # cap; a model's huge native context won't fit KV on 1 GPU
   "SM_VLLM_ENFORCE_EAGER": "true",    # faster cold start; drop for max throughput
 }
 ```
-Model-specific:
-- **Multimodal (Gemma 4)**: keep `max_model_len` modest (8k–16k) so KV cache fits; text-only
-  benchmarking needs no image inputs.
-- **Reasoning (GPT-OSS)**: responses may put text in a `reasoning` field with `content:null`.
-  Fine for serving; matters for benchmark validity (see `sagemaker-benchmark`).
+Optional, only if a given model needs it:
+- **Long native context**: keep `max_model_len` modest (8k–16k) so the KV cache fits the GPU.
+- **GPU memory pressure**: lower `SM_VLLM_GPU_MEMORY_UTILIZATION` (e.g. `"0.85"`).
 - **Trust remote code**: add `SM_VLLM_TRUST_REMOTE_CODE=""` only if the model requires it.
+- **Reasoning models**: responses may put text in a `reasoning` field with `content:null`.
+  Fine for serving; matters for benchmark validity (see `sagemaker-benchmark`).
 
 ## Procedure
 
