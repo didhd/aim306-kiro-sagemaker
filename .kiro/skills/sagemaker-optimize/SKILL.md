@@ -44,6 +44,12 @@ poll `describe_ai_recommendation_job` → deploy the result's Model Package
 ## Procedure
 1. **Workload** — `create_ai_workload_config` describing your traffic (sharegpt, or a
    custom JSONL dataset in S3 via `DatasetConfig.InputDataConfig` with a folder S3Uri).
+   **Dataset-format asymmetry vs the benchmark service:** the recommendation service
+   validates the dataset files and accepts only **ShareGPT or OpenAI Chat/Completions**
+   records — it rejects the benchmark's AIPerf `single_turn` lines (`{"text", ...}`) with
+   "unrecognized format". Use the bundled `datasets/sharegpt-curated-openai.jsonl` (the
+   benchmark skill's curated prompts converted to OpenAI Chat format) so the
+   recommendation optimizes for the same traffic the benchmark measures.
 2. **Recommendation job** — `create_ai_recommendation_job` with `ModelSource.S3`,
    `PerformanceTarget.Constraints=[{Metric: throughput|latency}]`,
    `ComputeSpec.InstanceTypes=[...]`, `InferenceSpecification.Framework` (VLLM for config
@@ -60,7 +66,8 @@ poll `describe_ai_recommendation_job` → deploy the result's Model Package
 
 ## Reference implementation
 - `scripts/recommend.py` — steps 1–4 (dry-run by default; `--run`; `--optimize` for the deep
-  path; `--dataset-s3/--dataset-file` for a custom workload; `--reservation-arn` for capacity).
+  path; `--dataset-file <local.jsonl>` stages a custom workload to S3 automatically — e.g.
+  the bundled `datasets/sharegpt-curated-openai.jsonl`; `--reservation-arn` for capacity).
 - `scripts/deploy_recommendation.py` — steps 5 (dry-run by default; `--deploy`). Deploys the
   recommendation's Model Package as an endpoint.
 - Region / account / role / bucket auto-detected (`scripts/config.py`). Tear down with
@@ -78,6 +85,10 @@ produces while a live job runs — or instead of one.
 ## Guards
 - The recommendation/benchmark service assumes your execution role — it must trust
   `sagemaker.amazonaws.com`.
+- The permission check applies to the **`RoleArn` the job runs under** (resolved by
+  `config.py`), not the CLI identity you test with — verify the right principal. In Studio,
+  `config.py` now resolves to the role your session is actually assuming; `SAGEMAKER_ROLE_ARN`
+  overrides it explicitly.
 - **Execution role needs `servicequotas:GetServiceQuota`** (also `ListServiceQuotas` /
   `GetAWSDefaultServiceQuota`). The recommendation job checks instance quota before it runs;
   without this it **fails in ~60s** with `AccessDeniedException: Role lacks
@@ -87,6 +98,7 @@ produces while a live job runs — or instead of one.
   to get capacity. Pre-bake and keep the result in S3.
 - Compare like-for-like: run the baseline and the optimized benchmark with the **same
   workload** (same dataset, token counts, concurrency) or the before/after isn't fair.
-  The benchmark skill defaults to its bundled `datasets/sharegpt-curated.jsonl` — pass the
-  same file here via `--dataset-s3`/`--dataset-file` so the recommendation job optimizes
-  for the workload you actually measure.
+  The benchmark skill defaults to its bundled `datasets/sharegpt-curated.jsonl`; this skill
+  bundles the same prompts in the format this service accepts —
+  `--dataset-file datasets/sharegpt-curated-openai.jsonl` — so the recommendation job
+  optimizes for the workload you actually measure.

@@ -17,7 +17,8 @@ Resolution order (first hit wins), so it works in SageMaker Studio AND on a lapt
   region : AWS_REGION / AWS_DEFAULT_REGION env -> boto3 session -> "us-west-2"
   account: STS get_caller_identity (always available once credentials are set)
   role   : SAGEMAKER_ROLE_ARN env -> the SageMaker SDK's notion of the attached role
-           (auto in Studio) -> first role named like a SageMaker execution role
+           (auto in Studio) -> the SageMaker execution role the CURRENT credentials are
+           assuming (Studio terminals) -> first role named like a SageMaker execution role
   bucket : SAGEMAKER_BUCKET env -> sagemaker default bucket (sagemaker-<region>-<acct>)
 """
 import os
@@ -73,7 +74,26 @@ def execution_role_arn(sess: boto3.session.Session | None = None) -> str:
     except Exception:
         pass
 
-    # 3) Last resort outside Studio: find a role that looks like a SageMaker exec role.
+    # 3) If the *current credentials* are an assumed SageMaker execution role (Studio
+    #    terminals, SageMaker jobs), use exactly that role — never guess a different one.
+    #    The IAM scan below can pick an older, differently-permissioned role that merely
+    #    matches by name.
+    try:
+        import re
+
+        sts_arn = sess.client("sts").get_caller_identity()["Arn"]
+        m = re.match(r"arn:aws:sts::(\d+):assumed-role/([^/]+)/", sts_arn)
+        if m and "sagemaker" in m.group(2).lower():
+            account, role_name = m.group(1), m.group(2)
+            try:
+                # get_role recovers the full ARN incl. its path (e.g. /service-role/).
+                return sess.client("iam").get_role(RoleName=role_name)["Role"]["Arn"]
+            except Exception:
+                return f"arn:aws:iam::{account}:role/{role_name}"
+    except Exception:
+        pass
+
+    # 4) Last resort outside Studio: find a role that looks like a SageMaker exec role.
     #    Keeps the repo runnable on a laptop without forcing an env var.
     iam = sess.client("iam")
     for page in iam.get_paginator("list_roles").paginate():

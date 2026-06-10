@@ -33,12 +33,18 @@ Usage:
 """
 import argparse
 import json
+import pathlib
 import sys
 import time
 
 import boto3
 
 import config  # region / account / role / bucket — auto-detected, nothing hardcoded
+
+# Curated prompts in OpenAI Chat format — the same 500 prompts the benchmark skill uses,
+# converted because the recommendation service only accepts ShareGPT / OpenAI formats.
+DEFAULT_DATASET = (pathlib.Path(__file__).resolve().parent.parent
+                   / "datasets" / "sharegpt-curated-openai.jsonl")
 
 
 def workload_spec(concurrency: int, out_tokens: int, in_tokens: int,
@@ -58,8 +64,14 @@ def workload_spec(concurrency: int, out_tokens: int, in_tokens: int,
     }
     if custom_input_file:
         # A custom dataset is mounted by SageMaker at /opt/ml/input/data/datasets/.
-        # "single_turn" = one independent request per JSONL line ({"text", "output_length"}).
-        params["custom_dataset_type"] = "single_turn"
+        # NOTE the format asymmetry with the benchmark service: the recommendation
+        # service validates the dataset FILES themselves and accepts only ShareGPT /
+        # OpenAI Chat Completions / OpenAI Completions records — the benchmark-style
+        # AIPerf single_turn lines ({"text", ...}) are rejected ("unrecognized format").
+        # Use the bundled datasets/sharegpt-curated-openai.jsonl (the benchmark's
+        # curated prompts converted to OpenAI Chat format). "generic" + input_file is
+        # the shape the reference aws-samples recommendation notebook uses.
+        params["custom_dataset_type"] = "generic"
         params["input_file"] = f"/opt/ml/input/data/datasets/{custom_input_file}"
     else:
         params["public_dataset"] = "sharegpt"
@@ -92,7 +104,11 @@ def main() -> int:
     ap.add_argument("--dataset-s3", default=None,
                     help="optional S3 folder (must end with /) holding a custom JSONL dataset")
     ap.add_argument("--dataset-file", default=None,
-                    help="filename of the custom dataset inside --dataset-s3 (e.g. data.jsonl)")
+                    help="custom dataset: a local JSONL path to stage automatically (e.g. the "
+                         "bundled datasets/sharegpt-curated-openai.jsonl), or — together with "
+                         "--dataset-s3 — the filename inside that folder. Records must be "
+                         "ShareGPT or OpenAI Chat/Completions format (the recommendation "
+                         "service rejects other shapes); default: the public sharegpt feed")
     # --- Capacity reservation (deep-optimize on scarce instances) ---
     ap.add_argument("--reservation-arn", action="append", default=[],
                     help="ML reservation / training-plan ARN to run on (repeatable). "
@@ -117,7 +133,20 @@ def main() -> int:
     config_name = f"rec-cfg-{args.model_id}-{stamp}"
     job_name = f"rec-job-{args.model_id}-{stamp}"
 
-    spec = workload_spec(args.concurrency, args.out_tokens, args.in_tokens, args.dataset_file)
+    # A --dataset-file without --dataset-s3 is a local JSONL we stage to S3 ourselves
+    # (mirrors benchmark.py). With --dataset-s3 it's just the filename in that folder.
+    dataset_local = None
+    dataset_name = None
+    if args.dataset_file and not args.dataset_s3:
+        dataset_local = pathlib.Path(args.dataset_file)
+        if not dataset_local.is_file():
+            raise SystemExit(f"dataset file not found: {dataset_local}")
+        dataset_name = dataset_local.name
+        args.dataset_s3 = f"s3://{bucket}/recommendation-datasets/{stamp}/"
+    elif args.dataset_file:
+        dataset_name = pathlib.Path(args.dataset_file).name
+
+    spec = workload_spec(args.concurrency, args.out_tokens, args.in_tokens, dataset_name)
 
     print("=== RECOMMENDATION PLAN (sagemaker-optimize contract) ===")
     print(f"  region     : {region}")
@@ -148,6 +177,10 @@ def main() -> int:
         "AIWorkloadConfigs": {"WorkloadSpec": {"Inline": json.dumps(spec)}},
     }
     if args.dataset_s3:
+        if dataset_local:
+            key = f"recommendation-datasets/{stamp}/{dataset_name}"
+            sess.client("s3").upload_file(str(dataset_local), bucket, key)
+            print(f"Dataset staged: s3://{bucket}/{key}")
         create_cfg_kwargs["DatasetConfig"] = {
             "InputDataConfig": [{
                 "ChannelName": "datasets",
