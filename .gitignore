@@ -12,6 +12,7 @@ venv/
 # Local benchmark outputs / downloaded artifacts
 results/
 artifacts/
+bench-results/
 *.tar.gz
 
 # OS / editor

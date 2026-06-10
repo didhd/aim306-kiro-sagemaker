@@ -44,18 +44,25 @@ its own. `config.py` (and `teardown.py`) are bundled into each skill that uses t
 │   │   │   └── scripts/                    # config.py, deploy.py, smoke_test.py, teardown.py
 │   │   ├── sagemaker-benchmark/            # contract: managed SageMaker AI inference benchmark
 │   │   │   ├── SKILL.md
-│   │   │   └── scripts/                    # config.py, benchmark.py, cloudwatch_metrics.py
+│   │   │   └── scripts/                    # config.py, benchmark.py, benchmark_results.py, cloudwatch_metrics.py
 │   │   └── sagemaker-optimize/             # contract: recommend an optimized config + redeploy
 │   │       ├── SKILL.md
 │   │       └── scripts/                    # config.py, recommend.py, deploy_recommendation.py, teardown.py
 │   └── steering/codetalk.md               # Kiro steering for this project
+├── .agents/skills  -> .kiro/skills        # same skills via the cross-agent convention
+├── .claude/skills  -> .kiro/skills        # same skills for Claude Code
 └── notebooks/demo.ipynb                   # the SAME workflow by hand — the long way (see below)
 ```
 
+The skills are discoverable by **any Agent-Skills-compatible agent**: Kiro reads
+`.kiro/skills/`, Claude Code reads `.claude/skills/`, and other compliant agents read the
+cross-client `.agents/skills/` convention — all three are the same folders (symlinks), so
+there is exactly one copy of each contract.
+
 The bundled scripts (boto3 reference implementations of the contracts):
 `config.py` (auto-detect region/account/role/bucket) · `deploy.py` · `smoke_test.py` ·
-`benchmark.py` · `recommend.py` · `deploy_recommendation.py` · `cloudwatch_metrics.py` ·
-`teardown.py`.
+`benchmark.py` · `benchmark_results.py` · `recommend.py` · `deploy_recommendation.py` ·
+`cloudwatch_metrics.py` · `teardown.py`.
 
 ## The whole point, in one picture
 
@@ -67,7 +74,7 @@ the SKILL.md already encodes all of it.
 | | By hand (`notebooks/demo.ipynb`) | With the agent (`.kiro/skills/`) |
 |---|---|---|
 | Deploy | ~10 cells: resolve DLC, build env, 4 API calls, 2 polling loops | *"Deploy GPT-OSS-20B for benchmarking."* |
-| Benchmark | workload config + job + poll + parse S3 | *"Benchmark this endpoint."* |
+| Benchmark | workload config + job + poll + download/extract/parse the S3 tarball | *"Benchmark this endpoint."* |
 | Optimize | recommendation job + read config + redeploy + re-benchmark | *"Find a faster config and show the speed-up."* |
 
 The notebook isn't the easy path — it's the **"here's everything the skill is doing for
@@ -84,7 +91,8 @@ of natural-language prompts — Kiro fires the matching skill and runs the refer
 
 > **"Benchmark this endpoint."**
 > → `sagemaker-benchmark` → `create_ai_workload_config` → `create_ai_benchmark_job` →
-> polls to completion → TTFT / ITL / latency / throughput in S3. **This is the baseline.**
+> polls to completion → pulls the results bundle from S3 and **shows** the headline
+> TTFT / ITL / latency / throughput numbers. **This is the baseline.**
 
 > **"Find a faster serving config and show me the speed-up."**
 > → `sagemaker-optimize` → `create_ai_recommendation_job` → deploy the recommended config →
@@ -109,6 +117,7 @@ python smoke_test.py --endpoint NAME --ic IC      # one chat request
 # Benchmark skill
 cd ../../sagemaker-benchmark/scripts
 python benchmark.py --endpoint NAME --ic IC --run # baseline benchmark (billable)
+python benchmark_results.py                       # fetch + show the results bundle (read-only)
 python cloudwatch_metrics.py --endpoint NAME --ic IC
 
 # Optimize skill

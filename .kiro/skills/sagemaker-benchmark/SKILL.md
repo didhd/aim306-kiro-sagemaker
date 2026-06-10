@@ -33,7 +33,7 @@ hand-built load generator, no self-managed AIPerf.
 ## APIs (verified present in boto3 1.43.24)
 `create_ai_workload_config` → `create_ai_benchmark_job` → poll `describe_ai_benchmark_job`.
 
-## Defaults (LA Summit 2026)
+## Defaults
 
 | Field | Value |
 |---|---|
@@ -82,14 +82,53 @@ client.create_ai_benchmark_job(
 Poll `describe_ai_benchmark_job(AIBenchmarkJobName=job_name)["AIBenchmarkJobStatus"]`
 every 30s until `Completed | Failed | Stopped`.
 
-### Step 4: Read results from S3
-Output contains `profile_export_aiperf.json` / `.csv` (aggregated TTFT, ITL,
-P50/P90/P99, throughput) and `profile_export.jsonl` (raw per-request). Surface the
-headline numbers (throughput, TTFT, latency) for the talk.
+### Step 4: Read the results from S3
+The job writes one tarball per run to `<S3OutputLocation>/output/output.tar.gz`.
+Extracted, the bundle looks like this:
+
+```
+output/
+├── profile_export_aiperf.json   # aggregated metrics — parse THIS for the numbers
+├── profile_export_aiperf.csv    # the same aggregates as CSV (spreadsheet-friendly)
+├── profile_export.jsonl         # raw per-request records
+├── inputs.json                  # the prompts AIPerf sent during the run
+├── outputs.json                 # what the model answered
+├── benchmark_summary.txt        # completion summary
+├── failure_reason.txt           # present only when the validity gate tripped
+├── plot_generation.log          # plot generation log
+├── plots/
+│   ├── ttft_timeline.png        # TTFT per request over the run
+│   ├── ttft_over_time.png       # TTFT aggregated over the run duration
+│   └── summary.txt              # list of generated plots
+└── logs/
+    └── aiperf.log               # full AIPerf execution log
+```
+
+The bundle serves two audiences: **an agent** parses `profile_export_aiperf.json`
+(each metric is `{"unit", "avg", "p1"…"p99", "min", "max"}`), and **a human** opens
+the PNG plots, the CSV, and the raw logs. Headline keys to surface:
+`output_token_throughput`, `time_to_first_token`, `inter_token_latency`,
+`request_latency`, `request_throughput`, plus `request_count` / `error_request_count`
+for validity.
+
+### Step 5: Present the results
+Run `scripts/benchmark_results.py` (read-only) to fetch the bundle, print the file
+tree with annotations, and surface the headline numbers — end the benchmark beat by
+**showing** the result, not by pointing at an S3 path:
+
+```
+python scripts/benchmark_results.py                  # latest standalone job
+python scripts/benchmark_results.py --job JOB_NAME   # a specific job
+```
+
+A job marked `Failed` by AIPerf's ~1% validity gate still has a complete bundle —
+the reader detects that case, says so, and reports the metrics over the valid
+requests.
 
 ## Reference implementation
 `scripts/benchmark.py` implements this contract (dry-run by default, `--run` to launch).
 Region / role / output bucket are auto-detected (`scripts/config.py`).
+`scripts/benchmark_results.py` presents the finished job's results (Step 4–5).
 `scripts/cloudwatch_metrics.py` reads the matching endpoint observability (invocations,
 concurrency, latency) after the run.
 

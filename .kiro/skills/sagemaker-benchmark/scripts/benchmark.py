@@ -15,8 +15,9 @@ The three public APIs, in order:
     create_ai_workload_config  ->  create_ai_benchmark_job  ->  describe_ai_benchmark_job
 
 This produces the **baseline** number we later compare against an optimized config
-(see scripts/recommend.py + scripts/deploy_recommendation.py for the "make it faster"
-beat). Benchmark first, optimize second, benchmark again -> before/after.
+(the ``sagemaker-optimize`` skill is the "make it faster" beat). Benchmark first,
+optimize second, benchmark again -> before/after. When the job finishes,
+``benchmark_results.py`` fetches the output bundle from S3 and presents it.
 
 Model-agnostic
 --------------
@@ -141,8 +142,7 @@ def main() -> int:
         print(f"  status: {status}")
         if status == "Completed":
             print("Results in S3:", d["OutputConfig"]["S3OutputLocation"])
-            print("Look for profile_export_aiperf.json/.csv (aggregates) and "
-                  "profile_export.jsonl (per-request).")
+            print(f"Show them: python benchmark_results.py --job {job_name}")
             break
         if status not in running:
             # Failed / Stopped, or any unexpected terminal state. One thing to know:
@@ -150,8 +150,11 @@ def main() -> int:
             # empty visible text (e.g. a reasoning model that spends its whole budget
             # "thinking") can trip that gate even though the endpoint returned 200 for
             # every request and the metrics over the valid requests are sound. If you
-            # hit this, pass an appropriate --extra-inputs for that model.
+            # hit this, pass an appropriate --extra-inputs for that model. The output
+            # bundle in S3 is still complete — benchmark_results.py can read it.
             print("FailureReason:", d.get("FailureReason", "(none reported)"))
+            print(f"If the validity gate tripped, the results bundle is still complete: "
+                  f"python benchmark_results.py --job {job_name}")
             break
         time.sleep(30)
     return 0

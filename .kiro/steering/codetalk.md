@@ -40,6 +40,9 @@ run them, don't rewrite. config.py + teardown.py are bundled into each skill tha
 that sells the skills.
 
 ## Notes
+- **The skills are agent-portable.** `.agents/skills` (cross-agent convention) and
+  `.claude/skills` (Claude Code) are symlinks to `.kiro/skills` — one copy of each contract,
+  discoverable from any Agent-Skills-compatible agent.
 - **No hardcoded account.** Region / account / role / bucket auto-detect via each skill's `config.py`,
   so the repo runs unchanged in any account.
 - **Billable resources are opt-in:** scripts dry-run unless given `--deploy` / `--run` /
