@@ -58,10 +58,10 @@ INSTANCE_GPUS = {
     "ml.g6e.12xlarge": 4,  # 4x L40S 192 GB
     "ml.g6e.24xlarge": 4,  # 4x L40S 192 GB
     "ml.g6e.48xlarge": 8,  # 8x L40S 384 GB
-    # g5  = NVIDIA A10G (24 GB/GPU); g7e = NVIDIA B200 (~180 GB/GPU, newest, capacity scarce).
+    # g5  = NVIDIA A10G (24 GB/GPU); g7e = NVIDIA RTX PRO 6000 Blackwell (96 GB/GPU, newest, capacity scarce).
     "ml.g5.12xlarge": 4,   # 4x A10G  96 GB
-    "ml.g7e.2xlarge": 1,   # 1x B200 ~180 GB — newest, but capacity is scarce
-    "ml.g7e.12xlarge": 2,  # 2x B200
+    "ml.g7e.2xlarge": 1,   # 1x RTX PRO 6000 Blackwell  96 GB — newest, but capacity is scarce
+    "ml.g7e.12xlarge": 2,  # 2x RTX PRO 6000 Blackwell 192 GB
 }
 
 
