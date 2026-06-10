@@ -14,6 +14,14 @@ Running example: **GPT-OSS-20B** — a strong open model that is *not* one-click
 which is exactly the "raw weights → production" case this is about. Nothing here is
 model-specific; point it at any HuggingFace SafeTensor model.
 
+## Scan to follow along
+
+<p align="center">
+  <img src="assets/aim306-kiro-qr.svg" alt="QR code to this repo — github.com/didhd/aim306-kiro-sagemaker" width="240" height="240">
+</p>
+
+<p align="center"><strong>github.com/didhd/aim306-kiro-sagemaker</strong></p>
+
 ---
 
 ## The idea: skills are the portable contract
