@@ -66,6 +66,15 @@ poll `describe_ai_recommendation_job` → deploy the result's Model Package
 - Region / account / role / bucket auto-detected (`scripts/config.py`). Tear down with
   `scripts/teardown.py` — both the baseline and optimized endpoints bill while InService.
 
+## No time for a live job? Use the bundled sample
+A recommendation job runs candidate configs on managed GPU compute — the config search for
+GPT-OSS-20B took **~70 minutes**. A completed job's real result is bundled with this skill at
+`sample-output/recommendation.json` (sanitized identifiers, real numbers): the recommended
+config (`ml.g6.24xlarge`, 2 copies, TP=2, concurrency 88), the `ExpectedPerformance`
+(**1,893 tok/s** vs the 218 tok/s baseline — ≈8.7×), and the Model Package ARN shape.
+See `sample-output/README.md` for how to read it. Use it to show what the optimize beat
+produces while a live job runs — or instead of one.
+
 ## Guards
 - The recommendation/benchmark service assumes your execution role — it must trust
   `sagemaker.amazonaws.com`.

@@ -125,6 +125,18 @@ A job marked `Failed` by AIPerf's ~1% validity gate still has a complete bundle 
 the reader detects that case, says so, and reports the metrics over the valid
 requests.
 
+### No time for a live run? Use the bundled sample
+A real run's complete bundle ships with this skill in `sample-output/` (GPT-OSS-20B
+baseline on `ml.g6.16xlarge` — the talk's **218 tok/s** "before" number; see
+`sample-output/README.md`). Present it without any AWS call:
+
+```
+python scripts/benchmark_results.py --local sample-output
+```
+
+Use it to show what a benchmark produces while a live job is still running — or
+instead of one.
+
 ## Reference implementation
 `scripts/benchmark.py` implements this contract (dry-run by default, `--run` to launch).
 Region / role / output bucket are auto-detected (`scripts/config.py`).

@@ -44,10 +44,12 @@ its own. `config.py` (and `teardown.py`) are bundled into each skill that uses t
 │   │   │   └── scripts/                    # config.py, deploy.py, smoke_test.py, teardown.py
 │   │   ├── sagemaker-benchmark/            # contract: managed SageMaker AI inference benchmark
 │   │   │   ├── SKILL.md
-│   │   │   └── scripts/                    # config.py, benchmark.py, benchmark_results.py, cloudwatch_metrics.py
+│   │   │   ├── scripts/                    # config.py, benchmark.py, benchmark_results.py, cloudwatch_metrics.py
+│   │   │   └── sample-output/              # a REAL run's full AIPerf bundle (the 218 tok/s baseline)
 │   │   └── sagemaker-optimize/             # contract: recommend an optimized config + redeploy
 │   │       ├── SKILL.md
-│   │       └── scripts/                    # config.py, recommend.py, deploy_recommendation.py, teardown.py
+│   │       ├── scripts/                    # config.py, recommend.py, deploy_recommendation.py, teardown.py
+│   │       └── sample-output/              # a REAL recommendation result (the 1,893 tok/s config)
 │   └── steering/codetalk.md               # Kiro steering for this project
 ├── .agents/skills  -> .kiro/skills        # same skills via the cross-agent convention
 ├── .claude/skills  -> .kiro/skills        # same skills for Claude Code
@@ -118,6 +120,7 @@ python smoke_test.py --endpoint NAME --ic IC      # one chat request
 cd ../../sagemaker-benchmark/scripts
 python benchmark.py --endpoint NAME --ic IC --run # baseline benchmark (billable)
 python benchmark_results.py                       # fetch + show the results bundle (read-only)
+python benchmark_results.py --local ../sample-output  # or: the bundled real run, no AWS calls
 python cloudwatch_metrics.py --endpoint NAME --ic IC
 
 # Optimize skill
@@ -127,6 +130,19 @@ python deploy_recommendation.py --rec-job REC_JOB --deploy # deploy the recommen
 # …then benchmark the new endpoint and compare to the baseline → before/after.
 python teardown.py --endpoint NAME --yes          # delete everything (stops billing)
 ```
+
+### Don't want to wait? Real results are bundled
+The slow steps ship with **real output you can open right now**, so you can see what a
+benchmark and an optimization produce before (or instead of) running one:
+
+- `.kiro/skills/sagemaker-benchmark/sample-output/` — a real run's complete AIPerf bundle
+  (metrics JSON/CSV, per-request records, model answers, TTFT plots, logs). Present it with
+  `python scripts/benchmark_results.py --local sample-output` — no AWS calls.
+- `.kiro/skills/sagemaker-optimize/sample-output/recommendation.json` — a real completed
+  recommendation job's result: the winning config, `ExpectedPerformance`, and the Model
+  Package ARN shape (the job took ~70 min; identifiers sanitized, numbers real).
+
+Each folder has a README explaining how to read what's in it.
 
 ### Runs in any account — nothing hardcoded
 Each skill's `scripts/config.py` resolves region, account, execution role, and bucket from the live

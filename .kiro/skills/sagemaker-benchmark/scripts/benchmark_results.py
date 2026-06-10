@@ -37,17 +37,16 @@ Usage:
     python benchmark_results.py                       # latest standalone benchmark job
     python benchmark_results.py --job bench-NAME      # a specific job by name
     python benchmark_results.py --s3 s3://…/prefix/   # read an output prefix directly
+    python benchmark_results.py --local DIR           # an already-extracted bundle, e.g.
+                                                      #   --local ../sample-output  (bundled
+                                                      #   real run — no AWS calls, no waiting)
 
-Read-only: this downloads from S3 and prints. It creates nothing billable.
+Read-only: this downloads from S3 (or reads a local folder) and prints. Nothing billable.
 """
 import argparse
 import json
 import pathlib
 import tarfile
-
-import boto3
-
-import config  # region / role / bucket — auto-detected, nothing hardcoded
 
 
 # What each file in the bundle is for — printed next to the tree so the output is
@@ -117,7 +116,7 @@ def fetch_bundle(s3, s3_prefix: str, workdir: pathlib.Path) -> pathlib.Path:
 
 
 def print_tree(workdir: pathlib.Path) -> None:
-    print("\n=== WHAT THE JOB WROTE (the AIPerf bundle, from S3) ===")
+    print("\n=== WHAT THE JOB WROTE (the AIPerf bundle) ===")
     files = sorted(p for p in workdir.rglob("*") if p.is_file())
     for p in files:
         rel = p.relative_to(workdir).as_posix()
@@ -167,9 +166,23 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Present a benchmark job's results from S3.")
     ap.add_argument("--job", help="benchmark job name (default: the latest standalone job)")
     ap.add_argument("--s3", help="read this S3 output prefix directly instead of a job name")
+    ap.add_argument("--local", help="read an already-extracted bundle folder "
+                                    "(e.g. the skill's bundled sample-output) — no AWS calls")
     ap.add_argument("--out", default="bench-results",
                     help="local folder to keep the bundle in (default: ./bench-results)")
     args = ap.parse_args()
+
+    if args.local:
+        workdir = pathlib.Path(args.local)
+        if not workdir.is_dir():
+            raise SystemExit(f"{workdir} is not a directory.")
+        print(f"local bundle: {workdir}")
+        print_tree(workdir)
+        print_metrics(workdir)
+        return 0
+
+    import boto3
+    import config  # region / role / bucket — auto-detected, nothing hardcoded
 
     sess = boto3.session.Session(region_name=config.region())
     s3 = sess.client("s3")
