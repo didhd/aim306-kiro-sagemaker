@@ -79,7 +79,9 @@ def workload_spec(concurrency: int, request_count: int, out_tokens: int,
     }
     if dataset_file:
         # The dataset channel is mounted by SageMaker at /opt/ml/input/data/datasets/.
-        params["custom_dataset_type"] = "generic"
+        # "single_turn" = AIPerf's one-independent-request-per-line type, matching our
+        # {"text", "output_length"} records. (Not "generic" — AIPerf rejects that.)
+        params["custom_dataset_type"] = "single_turn"
         params["input_file"] = f"/opt/ml/input/data/datasets/{dataset_file}"
     else:
         params["public_dataset"] = "sharegpt"       # the raw feed (see docstring caveat)

@@ -58,7 +58,8 @@ def workload_spec(concurrency: int, out_tokens: int, in_tokens: int,
     }
     if custom_input_file:
         # A custom dataset is mounted by SageMaker at /opt/ml/input/data/datasets/.
-        params["custom_dataset_type"] = "generic"
+        # "single_turn" = one independent request per JSONL line ({"text", "output_length"}).
+        params["custom_dataset_type"] = "single_turn"
         params["input_file"] = f"/opt/ml/input/data/datasets/{custom_input_file}"
     else:
         params["public_dataset"] = "sharegpt"

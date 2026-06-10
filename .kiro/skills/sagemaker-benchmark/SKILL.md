@@ -61,7 +61,7 @@ Stage the dataset file in S3 (any folder; the URI must end with `/`), then:
 workload_spec = {
     "benchmark": {"type": "aiperf"},
     "parameters": {
-        "custom_dataset_type": "generic",
+        "custom_dataset_type": "single_turn",   # one independent request per JSONL line
         "input_file": "/opt/ml/input/data/datasets/sharegpt-curated.jsonl",
         "prompt_input_tokens_mean": 500, "prompt_input_tokens_stddev": 10,
         "output_tokens_mean": 256, "output_tokens_stddev": 16,
