@@ -173,40 +173,7 @@ run it, and it targets *your* environment — automatically in SageMaker Studio,
 
 ---
 
-## What we learned (validated end-to-end on real infrastructure)
-
-These are the things that actually bite you — and what the talk is really about.
-
-**1. Quota ≠ capacity.** A deploy can sit in `Creating` and then fail with
-`InsufficientInstanceCapacity` *even when your quota is non-zero*. The newest instances
-(e.g. `g7e`) are the scarcest. Keep a **fallback instance** (`ml.g6.16xlarge` — 1× L4
-24 GB, where GPT-OSS-20B's ~13 GB mxfp4 weights fit — came up reliably in ~4 min) and
-**pre-warm on a capacity reservation** before a live demo. (Instance families: g6 = L4
-24 GB, g6e = L40S 48 GB, g7e = B200.)
-
-**2. "Latest container" must match the GPU.** `deploy.py` resolves the newest vLLM Deep
-Learning Container from ECR live, picking the highest **vLLM version** (not the
-most-recently-pushed image). CUDA build must match the GPU generation:
-Blackwell (g7e) → cu129+, Ada (g6/g6e) → cu129/cu130, Ampere (g5) → cu128.
-
-**3. Optimization is a job, not a flag.** The deep speed-up (speculative decoding / EAGLE 3,
-quantization, kernel tuning via `OptimizeModel=True`) runs on a large instance and takes
-**hours**, usually on reserved capacity. Treat it like a build artifact: **pre-bake** it and
-deploy the result, rather than waiting on it live. The lighter config-search path
-(`OptimizeModel=False`) is fast enough to run in front of an audience.
-
-**4. Know what your benchmark dataset actually sends.** The raw public sharegpt feed
-derives each request's output budget from the dataset's recorded answer lengths — and a
-fixed handful of turns carry budgets of only 1–3 tokens. A reasoning model can't emit
-visible text within that, AIPerf scores those requests invalid, and its ~1% validity gate
-fails the job — deterministically, every run, while the endpoint returns HTTP 200
-throughout. It's a dataset artifact, not a fault, and global knobs (`output_tokens_mean`,
-`min_tokens`) can't override per-request budgets. The benchmark skill therefore defaults to
-a **bundled curated slice** of sharegpt (500 real prompts, budgets ≥32 tokens) staged to S3
-automatically; `--extra-inputs` remains for model-specific request fields like
-`reasoning_effort:low`.
-
-### Before / after (GPT-OSS-20B, measured, sharegpt, ~500 in / ~256 out)
+## Before / after (GPT-OSS-20B, measured, sharegpt, ~500 in / ~256 out)
 The **before** is the baseline benchmark on a single GPU. The **after** is the configuration
 the SageMaker AI recommendation job found and projects — both measured on real infrastructure
 in us-west-2:
