@@ -50,16 +50,20 @@ its own. `config.py` (and `teardown.py`) are bundled into each skill that uses t
 │   │       ├── SKILL.md
 │   │       ├── scripts/                    # config.py, recommend.py, deploy_recommendation.py, teardown.py
 │   │       └── sample-output/              # a REAL recommendation result (the 1,893 tok/s config)
-│   └── steering/codetalk.md               # Kiro steering for this project
+│   └── steering/codetalk.md               # project steering for the agent
 ├── .agents/skills  -> .kiro/skills        # same skills via the cross-agent convention
 ├── .claude/skills  -> .kiro/skills        # same skills for Claude Code
+├── .claude/CLAUDE.md -> steering          # same steering for Claude Code
+├── AGENTS.md -> steering                  # same steering via the agents.md convention
 └── notebooks/demo.ipynb                   # the SAME workflow by hand — the long way (see below)
 ```
 
 The skills are discoverable by **any Agent-Skills-compatible agent**: Kiro reads
 `.kiro/skills/`, Claude Code reads `.claude/skills/`, and other compliant agents read the
 cross-client `.agents/skills/` convention — all three are the same folders (symlinks), so
-there is exactly one copy of each contract.
+there is exactly one copy of each contract. The same goes for steering:
+`.kiro/steering/codetalk.md` is the single source, symlinked as `.claude/CLAUDE.md` for
+Claude Code and as root `AGENTS.md` for every tool that follows [agents.md](https://agents.md).
 
 The bundled scripts (boto3 reference implementations of the contracts):
 `config.py` (auto-detect region/account/role/bucket) · `deploy.py` · `smoke_test.py` ·

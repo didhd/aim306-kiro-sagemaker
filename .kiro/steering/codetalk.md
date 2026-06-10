@@ -2,11 +2,16 @@
 inclusion: always
 ---
 
-# Project context for Kiro
+# Project context for the coding agent
 
 This repo takes a raw open-weight LLM to a deployed, **benchmarked, and optimized** Amazon
 SageMaker AI endpoint **without writing the plumbing by hand** — driving everything through a
 coding agent steered by SKILL.md contracts.
+
+> This file is the single source of steering. It is read natively by Kiro
+> (`.kiro/steering/codetalk.md`) and mirrored via symlinks as `.claude/CLAUDE.md`
+> (Claude Code) and `AGENTS.md` at the repo root (the agents.md convention: Codex,
+> Cursor, Gemini CLI, and others) — one copy, every agent.
 
 ## Scope
 - **In:** deploy + managed benchmark + optimization (recommendation) + observability.
