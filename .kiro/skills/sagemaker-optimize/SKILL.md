@@ -87,3 +87,6 @@ produces while a live job runs — or instead of one.
   to get capacity. Pre-bake and keep the result in S3.
 - Compare like-for-like: run the baseline and the optimized benchmark with the **same
   workload** (same dataset, token counts, concurrency) or the before/after isn't fair.
+  The benchmark skill defaults to its bundled `datasets/sharegpt-curated.jsonl` — pass the
+  same file here via `--dataset-s3`/`--dataset-file` so the recommendation job optimizes
+  for the workload you actually measure.

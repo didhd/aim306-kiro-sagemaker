@@ -21,10 +21,25 @@ optimize second, benchmark again -> before/after. When the job finishes,
 
 Model-agnostic
 --------------
-Nothing here is specific to a particular model. The workload is just "realistic chat
-traffic from the sharegpt dataset." One optional knob, ``--extra-inputs``, lets you pass
-provider-specific request fields when a model needs them (example below) — but it
+Nothing here is specific to a particular model. The workload is realistic chat traffic
+drawn from the public sharegpt dataset. One optional knob, ``--extra-inputs``, lets you
+pass provider-specific request fields when a model needs them (example below) — but it
 defaults to empty, so the same command benchmarks any deployed endpoint.
+
+The bundled dataset (and why it is the default)
+-----------------------------------------------
+By default we benchmark with ``datasets/sharegpt-curated.jsonl`` — 500 real sharegpt
+prompts bundled with this skill — uploaded to S3 and attached to the workload config.
+Why not just ``public_dataset: sharegpt``? The raw feed derives each request's output
+budget from the dataset's recorded answer lengths, and a fixed handful of turns carry
+budgets of only 1–3 tokens. A reasoning model structurally cannot place visible content
+in so few tokens (the budget is consumed before the answer channel opens), so those
+requests score invalid and AIPerf's ~1% validity gate fails the whole job — same 10
+sessions, every run, regardless of ``output_tokens_mean`` (per-request budgets ignore
+it) or ``min_tokens`` (capped by the per-request ``max_completion_tokens``). The curated
+file is the same traffic with output budgets ≥32 tokens, so the gate measures the
+endpoint rather than a dataset artifact — for any model. ``--public-dataset`` restores
+the raw feed; ``--dataset-file`` swaps in your own JSONL ({"text", "output_length"}).
 
 Usage:
     python scripts/benchmark.py --endpoint NAME --ic IC_NAME           # dry run
@@ -35,11 +50,15 @@ Usage:
 """
 import argparse
 import json
+import pathlib
 import time
 
 import boto3
 
 import config  # region / role / bucket — auto-detected, nothing hardcoded
+
+# The curated sharegpt slice bundled with the skill (see module docstring).
+DEFAULT_DATASET = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sharegpt-curated.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -49,9 +68,8 @@ import config  # region / role / bucket — auto-detected, nothing hardcoded
 # or lighter run. None of this is model-specific.
 # ---------------------------------------------------------------------------
 def workload_spec(concurrency: int, request_count: int, out_tokens: int,
-                  extra_inputs: str) -> dict:
+                  extra_inputs: str, dataset_file: str | None) -> dict:
     params = {
-        "public_dataset": "sharegpt",               # real conversational prompts
         "prompt_input_tokens_mean": 500,            # ~500-token inputs…
         "prompt_input_tokens_stddev": 10,           # …with a little natural variation
         "output_tokens_mean": out_tokens,           # how many tokens to ask the model to generate
@@ -59,6 +77,12 @@ def workload_spec(concurrency: int, request_count: int, out_tokens: int,
         "concurrency": concurrency,                 # simultaneous in-flight requests
         "request_count": request_count,             # total requests in the run
     }
+    if dataset_file:
+        # The dataset channel is mounted by SageMaker at /opt/ml/input/data/datasets/.
+        params["custom_dataset_type"] = "generic"
+        params["input_file"] = f"/opt/ml/input/data/datasets/{dataset_file}"
+    else:
+        params["public_dataset"] = "sharegpt"       # the raw feed (see docstring caveat)
     # Optional, model-specific request fields. Left empty by default so the benchmark
     # is model-agnostic. Example: a reasoning model that otherwise spends its whole
     # output budget "thinking" and returns empty visible text can be nudged with
@@ -82,6 +106,13 @@ def main() -> int:
     ap.add_argument("--extra-inputs", default="",
                     help='optional model-specific request fields, space-separated '
                          '(e.g. "reasoning_effort:low"); empty by default')
+    ap.add_argument("--dataset-file", default=str(DEFAULT_DATASET),
+                    help="JSONL dataset to benchmark with ({'text','output_length'} per "
+                         "line); default: the curated sharegpt slice bundled with the skill")
+    ap.add_argument("--public-dataset", action="store_true",
+                    help="use the raw public sharegpt feed instead of a dataset file "
+                         "(note: its 1-3-token output budgets fail reasoning models "
+                         "against AIPerf's validity gate)")
     ap.add_argument("--run", action="store_true",
                     help="actually launch the job; without this it's a dry run")
     args = ap.parse_args()
@@ -89,18 +120,26 @@ def main() -> int:
     region = config.region()
     sess = boto3.session.Session(region_name=region)
     role = config.execution_role_arn(sess)
+    bucket = config.bucket(sess)
     # Results land under the SageMaker default bucket so the role can already write there.
-    s3_output = f"s3://{config.bucket(sess)}/benchmark-output/"
+    s3_output = f"s3://{bucket}/benchmark-output/"
 
-    spec = workload_spec(args.concurrency, args.requests, args.out_tokens, args.extra_inputs)
+    dataset_path = None if args.public_dataset else pathlib.Path(args.dataset_file)
+    if dataset_path and not dataset_path.is_file():
+        raise SystemExit(f"dataset file not found: {dataset_path}")
+
+    spec = workload_spec(args.concurrency, args.requests, args.out_tokens,
+                         args.extra_inputs, dataset_path.name if dataset_path else None)
     stamp = time.strftime("%y%m%d-%H%M%S")
     config_name = f"wl-{stamp}"     # the reusable workload definition
     job_name = f"bench-{stamp}"     # this specific run
+    dataset_s3 = f"s3://{bucket}/benchmark-datasets/{stamp}/"  # folder URI (must end with /)
 
     print("=== BENCHMARK PLAN (sagemaker-benchmark contract) ===")
     print(f"  region     : {region}")
     print(f"  endpoint   : {args.endpoint}")
     print(f"  ic         : {args.ic}")
+    print(f"  dataset    : {dataset_path if dataset_path else 'public sharegpt feed'}")
     print(f"  workload   : {json.dumps(spec['parameters'])}")
     print(f"  output     : {s3_output}")
     print(f"  job        : {job_name}")
@@ -111,10 +150,24 @@ def main() -> int:
     sm = sess.client("sagemaker")
 
     # 1) Define the workload. We pass it inline as JSON; SageMaker stores it as a
-    #    named, reusable config that benchmark jobs reference.
-    sm.create_ai_workload_config(
-        AIWorkloadConfigName=config_name,
-        AIWorkloadConfigs={"WorkloadSpec": {"Inline": json.dumps(spec)}})
+    #    named, reusable config that benchmark jobs reference. With a dataset file we
+    #    first stage it in S3 and attach it as an input channel SageMaker mounts for
+    #    the AIPerf driver.
+    cfg_kwargs = {
+        "AIWorkloadConfigName": config_name,
+        "AIWorkloadConfigs": {"WorkloadSpec": {"Inline": json.dumps(spec)}},
+    }
+    if dataset_path:
+        key = f"benchmark-datasets/{stamp}/{dataset_path.name}"
+        sess.client("s3").upload_file(str(dataset_path), bucket, key)
+        print(f"Dataset staged: s3://{bucket}/{key}")
+        cfg_kwargs["DatasetConfig"] = {
+            "InputDataConfig": [{
+                "ChannelName": "datasets",
+                "DataSource": {"S3DataSource": {"S3Uri": dataset_s3}},
+            }]
+        }
+    sm.create_ai_workload_config(**cfg_kwargs)
     print("WorkloadConfig:", config_name)
 
     # 2) Launch the benchmark against our endpoint + inference component. SageMaker

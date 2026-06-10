@@ -38,19 +38,31 @@ hand-built load generator, no self-managed AIPerf.
 | Field | Value |
 |---|---|
 | Target | endpoint `+` inference component from `sagemaker-deploy` |
-| Workload | `aiperf`, public dataset `sharegpt` |
+| Workload | `aiperf`, the bundled `datasets/sharegpt-curated.jsonl` (real sharegpt prompts; see note below) |
 | Profile | ~500 input / ~256 output tokens, concurrency 10, 300 requests |
 | Output | `s3://<sagemaker-default-bucket>/benchmark-output/` (auto-detected; never hardcoded) |
 | Role | the SageMaker execution role (must trust `sagemaker.amazonaws.com`) |
 
+**Why a bundled dataset and not `public_dataset: "sharegpt"`?** The raw feed derives each
+request's output budget from the dataset's recorded answer lengths, and a fixed handful of
+turns carry budgets of only 1–3 tokens. A reasoning model cannot emit visible content within
+1–3 tokens (the budget is consumed before the answer channel opens), so those requests score
+invalid and trip AIPerf's ~1% validity gate — deterministically, every run, regardless of
+`output_tokens_mean` (per-request budgets ignore it) or `min_tokens` (capped per-request).
+`datasets/sharegpt-curated.jsonl` is 500 real sharegpt prompts with output budgets ≥32
+tokens: same realistic traffic, but the gate measures the endpoint, not a dataset artifact.
+It is the default for **any** model; `--public-dataset` restores the raw feed.
+
 ## Workflow
 
 ### Step 1: Define the workload config
+Stage the dataset file in S3 (any folder; the URI must end with `/`), then:
 ```python
 workload_spec = {
     "benchmark": {"type": "aiperf"},
     "parameters": {
-        "public_dataset": "sharegpt",
+        "custom_dataset_type": "generic",
+        "input_file": "/opt/ml/input/data/datasets/sharegpt-curated.jsonl",
         "prompt_input_tokens_mean": 500, "prompt_input_tokens_stddev": 10,
         "output_tokens_mean": 256, "output_tokens_stddev": 16,
         # Model-agnostic by default. Add only if a model needs it (see reasoning-model note):
@@ -61,8 +73,13 @@ workload_spec = {
 client.create_ai_workload_config(
     AIWorkloadConfigName=config_name,
     AIWorkloadConfigs={"WorkloadSpec": {"Inline": json.dumps(workload_spec)}},
+    DatasetConfig={"InputDataConfig": [{
+        "ChannelName": "datasets",   # mounted at /opt/ml/input/data/datasets/
+        "DataSource": {"S3DataSource": {"S3Uri": dataset_s3_folder}},  # ends with /
+    }]},
 )
 ```
+Each dataset line is `{"text": "<prompt>", "output_length": <int>}`.
 
 ### Step 2: Launch the benchmark job
 ```python
@@ -139,6 +156,8 @@ instead of one.
 
 ## Reference implementation
 `scripts/benchmark.py` implements this contract (dry-run by default, `--run` to launch).
+It stages the bundled dataset to S3 automatically; `--dataset-file` swaps in your own,
+`--public-dataset` uses the raw sharegpt feed instead.
 Region / role / output bucket are auto-detected (`scripts/config.py`).
 `scripts/benchmark_results.py` presents the finished job's results (Step 4–5).
 `scripts/cloudwatch_metrics.py` reads the matching endpoint observability (invocations,
@@ -147,9 +166,14 @@ concurrency, latency) after the run.
 ## Reasoning-model note (GPT-OSS-20B)
 GPT-OSS-20B is a reasoning model: with a small output budget it can spend all tokens in
 the `reasoning` channel and return `content: null`, which AIPerf scores as an invalid
-result (the benchmark fails if the invalid rate exceeds ~1%). Mitigate with:
-- a larger `output_tokens_mean` (≥256) so reasoning completes and `content` fills, and
-- `extra_inputs: "reasoning_effort:low"` to keep the reasoning channel short.
+result (the benchmark fails if the invalid rate exceeds ~1%).
+- The **bundled curated dataset (the default) already resolves this** — its per-request
+  output budgets are ≥32 tokens, enough for the answer channel to open.
+- `extra_inputs: "reasoning_effort:low"` additionally keeps the reasoning channel short
+  (useful belt-and-suspenders for reasoning models).
+- Knobs that do **not** fix it on the raw public feed: `output_tokens_mean` (per-request
+  budgets come from the dataset, not the mean) and `min_tokens` (capped by the
+  per-request `max_completion_tokens`).
 Do **not** set `ignore_eos:true` for reasoning models — let the model stop naturally.
 
 ## Pre-reqs / guards

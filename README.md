@@ -183,11 +183,16 @@ quantization, kernel tuning via `OptimizeModel=True`) runs on a large instance a
 deploy the result, rather than waiting on it live. The lighter config-search path
 (`OptimizeModel=False`) is fast enough to run in front of an audience.
 
-**4. Some request fields are model-specific.** A reasoning model can spend its whole output
-budget "thinking" and return empty visible text, which the AIPerf benchmark scores as
-invalid (it enforces a ~1% validity gate). The endpoint still returns HTTP 200 — it's an
-output *shape*, not a fault. `benchmark.py` exposes `--extra-inputs` to pass fields like
-`reasoning_effort:low` when a given model needs them; it's empty by default.
+**4. Know what your benchmark dataset actually sends.** The raw public sharegpt feed
+derives each request's output budget from the dataset's recorded answer lengths — and a
+fixed handful of turns carry budgets of only 1–3 tokens. A reasoning model can't emit
+visible text within that, AIPerf scores those requests invalid, and its ~1% validity gate
+fails the job — deterministically, every run, while the endpoint returns HTTP 200
+throughout. It's a dataset artifact, not a fault, and global knobs (`output_tokens_mean`,
+`min_tokens`) can't override per-request budgets. The benchmark skill therefore defaults to
+a **bundled curated slice** of sharegpt (500 real prompts, budgets ≥32 tokens) staged to S3
+automatically; `--extra-inputs` remains for model-specific request fields like
+`reasoning_effort:low`.
 
 ### Before / after (GPT-OSS-20B, measured, sharegpt, ~500 in / ~256 out)
 The **before** is the baseline benchmark on a single GPU. The **after** is the configuration
