@@ -1,5 +1,7 @@
 # From Model to Production: Agentic AI with Kiro on SageMaker
 
+> **Now available on AWS Samples:** This project has been published at [`aws-samples/sample-sagemaker-agentic-model-deployment`](https://github.com/aws-samples/sample-sagemaker-agentic-model-deployment).
+
 > **AWS Summit Los Angeles 2026 · AIM306**
 > Take a raw open-weight LLM to a deployed, **benchmarked, and optimized** Amazon SageMaker
 > AI endpoint — driven through a coding agent, **without writing the plumbing by hand**.
